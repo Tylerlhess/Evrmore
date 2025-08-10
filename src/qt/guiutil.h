@@ -70,6 +70,9 @@ namespace GUIUtil
     QString HtmlEscape(const QString& str, bool fMultiLine=false);
     QString HtmlEscape(const std::string& str, bool fMultiLine=false);
 
+// Format a P2AH address as ASSETNAME@CHAIN when possible
+QString formatP2AHDisplay(const QString& address, const QString& assetName = QString(), const QString& chain = QString("EVR"));
+
     /** Copy a field of the currently selected entry of a view to the clipboard. Does nothing if nothing
         is selected.
        @param[in] column  Data column to extract from the model

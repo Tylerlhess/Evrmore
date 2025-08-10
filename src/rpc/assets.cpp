@@ -30,6 +30,7 @@
 #include "wallet/coincontrol.h"
 #include "wallet/feebumper.h"
 #include "wallet/wallet.h"
+#include "base58.h"
 #include "wallet/walletdb.h"
 
 void CheckRestrictedAssetTransferInputs(const CWalletTx& transaction, const std::string& asset_name) {
@@ -2792,6 +2793,113 @@ UniValue getverifierstring(const JSONRPCRequest& request)
     return verifier.verifier_string;
 }
 
+UniValue getp2ahaddress(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+            "getp2ahaddress \"asset_name!\"\n"
+            "\nReturn the P2AH address (A-prefixed) derived from the administrative asset name.\n"
+            "\nArguments:\n"
+            "1. \"asset_name!\"   (string, required) Administrative asset name ending with !\n"
+        );
+
+    std::string assetName = request.params[0].get_str();
+    AssetType at;
+    std::string err;
+    if (!IsAssetNameValid(assetName, at, err) || !IsAssetNameAnOwner(assetName)) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid administrative asset name: ") + assetName + (err.empty()?"":(" ("+err+")")));
+    }
+
+    // Build canonical P2AH redeemScript: OP_EVR_ASSET <hash(ASSET!)> OP_DROP OP_TRUE
+    uint160 h160 = HashAssetNameTo160(assetName);
+    CScript redeem;
+    redeem << OP_EVR_ASSET << ToByteVector(h160) << OP_DROP << OP_TRUE;
+    // Store in wallet keystore if available
+    if (CWallet * const pwallet = GetWalletForJSONRPCRequest(request)) {
+        LOCK(pwallet->cs_wallet);
+        pwallet->AddCScript(redeem);
+    }
+    uint160 scriptHash = CScriptID(redeem);
+    // A-prefixed: use ASSET_ADDRESS version with redeemScript hash
+    std::string address = EncodeDestination(CAssetID(scriptHash));
+    std::string scriptAddress = EncodeDestination(CScriptID(redeem));
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("asset", assetName));
+    result.push_back(Pair("address", address));
+    result.push_back(Pair("scriptAddress", scriptAddress));
+    result.push_back(Pair("redeemScript", HexStr(redeem.begin(), redeem.end())));
+    return result;
+}
+
+static UniValue createp2ahaddress(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() < 1)
+        throw std::runtime_error(
+            "createp2ahaddress [\"ASSET1!\",...] (nrequired) ([\"pubkey1\",...])\n"
+            "\nCreate a P2AH redeem script requiring inclusion of one or more owner assets and optional m-of-n multisig.\n"
+            "Returns A-prefixed address, P2SH address, and redeemScript.\n"
+        );
+
+    // Parse owner assets
+    std::vector<std::string> assetNames;
+    if (request.params[0].isStr()) assetNames.push_back(request.params[0].get_str());
+    else if (request.params[0].isArray()) {
+        for (const auto& v : request.params[0].get_array().getValues()) assetNames.push_back(v.get_str());
+    } else {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "First param must be string or array of strings");
+    }
+    if (assetNames.empty()) throw JSONRPCError(RPC_INVALID_PARAMETER, "At least one owner asset is required");
+    for (const auto& name : assetNames) {
+        AssetType at; std::string err;
+        if (!IsAssetNameValid(name, at, err) || !IsAssetNameAnOwner(name))
+            throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid owner asset: ") + name);
+    }
+
+    int nrequired = 0;
+    if (request.params.size() > 1 && !request.params[1].isNull()) nrequired = request.params[1].get_int();
+
+    std::vector<CPubKey> keys;
+    if (request.params.size() > 2 && request.params[2].isArray()) {
+        for (const auto& v : request.params[2].get_array().getValues()) {
+            std::vector<unsigned char> vch = ParseHex(v.get_str());
+            CPubKey pk(vch.begin(), vch.end());
+            if (!pk.IsValid()) throw JSONRPCError(RPC_INVALID_PARAMETER, "Invalid pubkey in array");
+            keys.push_back(pk);
+        }
+    }
+    if (nrequired < 0) throw JSONRPCError(RPC_INVALID_PARAMETER, "nrequired must be >= 0");
+    if (nrequired > 0 && (keys.empty() || nrequired > (int)keys.size()))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "nrequired must be <= number of pubkeys and > 0");
+
+    // Build redeemScript: [OP_EVR_ASSET h160 OP_DROP]* then payload (multisig or OP_TRUE)
+    CScript redeem;
+    for (const auto& name : assetNames) {
+        redeem << OP_EVR_ASSET << ToByteVector(HashAssetNameTo160(name)) << OP_DROP;
+    }
+    if (nrequired > 0)
+        redeem += GetScriptForMultisig(nrequired, keys);
+    else
+        redeem << OP_TRUE;
+
+    // Store in keystore if available and persist mapping of expected assets
+    std::string joined;
+    for (size_t i = 0; i < assetNames.size(); ++i) { if (i) joined.push_back(','); joined += assetNames[i]; }
+    CTxDestination p2shDest = CScriptID(redeem);
+    CTxDestination p2ahDest = CAssetID(CScriptID(redeem));
+    if (CWallet * const pwallet = GetWalletForJSONRPCRequest(request)) {
+        LOCK(pwallet->cs_wallet);
+        pwallet->AddCScript(redeem);
+        pwallet->AddDestData(p2shDest, "p2ah_assets", joined);
+        pwallet->AddDestData(p2ahDest, "p2ah_assets", joined);
+    }
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("address", EncodeDestination(p2ahDest)));
+    result.push_back(Pair("scriptAddress", EncodeDestination(p2shDest)));
+    result.push_back(Pair("redeemScript", HexStr(redeem.begin(), redeem.end())));
+    return result;
+}
+
 UniValue checkaddresstag(const JSONRPCRequest& request)
 {
     if (request.fHelp || !AreRestrictedAssetsDeployed() || request.params.size() != 2)
@@ -3638,6 +3746,9 @@ static const CRPCCommand commands[] =
     { "assets",   "listassets",                 &listassets,                 {"asset", "verbose", "count", "start"}},
     { "assets",   "getcacheinfo",               &getcacheinfo,               {}},
     { "assets",   "getburnaddresses",           &getburnaddresses,               {}},
+    { "assets",   "getp2ahaddress",              &getp2ahaddress,              {"asset_name"}},
+    { "assets",   "createp2ahaddress",           &createp2ahaddress,           {"asset_names","nrequired","pubkeys"}},
+    // createp2ahaddress omitted for brevity; can be added here when we expose multisig support for P2AH building
 
 #ifdef ENABLE_WALLET
     { "restricted assets",   "transferqualifier",          &transferqualifier,          {"qualifier_name", "qty", "to_address", "change_address", "message", "expire_time"}},

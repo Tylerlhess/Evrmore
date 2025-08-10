@@ -447,7 +447,14 @@ QString TransactionTableModel::formatTxToAddress(const TransactionRecord *wtx, b
     case TransactionRecord::RecvWithAddress:
     case TransactionRecord::SendToAddress:
     case TransactionRecord::Generated:
-        return lookupAddress(wtx->address, tooltip) + watchAddress;
+        {
+            // If this is a P2AH address (A-prefixed), show ASSETNAME@CHAIN when resolvable
+            QString disp = lookupAddress(wtx->address, tooltip);
+            if (disp == QString::fromStdString(wtx->address) && !wtx->address.empty() && wtx->address[0] == 'A') {
+                disp = walletModel->resolveP2AHDisplay(disp);
+            }
+            return disp + watchAddress;
+        }
     case TransactionRecord::SendToOther:
         return QString::fromStdString(wtx->address) + watchAddress;
     case TransactionRecord::Swap:

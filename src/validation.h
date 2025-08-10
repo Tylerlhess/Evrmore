@@ -605,6 +605,9 @@ bool AreCoinbaseCheckAssetsDeployed();
 
 bool AreP2SHAssetsAllowed();
 
+// P2AH deployment flag
+bool AreP2AHDeployed();
+
 // Only used by test framework
 void SetEnforcedValues(bool value);
 void SetEnforcedCoinbase(bool value);

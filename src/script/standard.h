@@ -9,6 +9,7 @@
 #define EVRMORE_SCRIPT_STANDARD_H
 
 #include "script/interpreter.h"
+#include <algorithm>
 #include "uint256.h"
 
 #include <boost/variant.hpp>
@@ -72,6 +73,8 @@ enum txnouttype
     TX_TRANSFER_ASSET = 10,
     TX_RESTRICTED_ASSET_DATA = 11, //!< unspendable OP_EVRMORE_ASSET script that carries data
     /** RVN END */
+    // New logical destination for Pay-to-Asset-Hash outputs
+    TX_ASSETHASH = 20
 };
 
 class CNoDestination {
@@ -85,9 +88,16 @@ public:
  *  * CNoDestination: no destination set
  *  * CKeyID: TX_PUBKEYHASH destination
  *  * CScriptID: TX_SCRIPTHASH destination
+ *  * CAssetID: TX_ASSETHASH destination (Pay-to-Asset-Hash logical destination)
  *  A CTxDestination is the internal data type encoded in a evrmore address
  */
-typedef boost::variant<CNoDestination, CKeyID, CScriptID> CTxDestination;
+class CAssetID : public uint160 {
+public:
+    CAssetID() : uint160() {}
+    explicit CAssetID(const uint160& in) : uint160(in) {}
+};
+
+typedef boost::variant<CNoDestination, CKeyID, CScriptID, CAssetID> CTxDestination;
 
 /** Check whether a CTxDestination is a CNoDestination. */
 bool IsValidDestination(const CTxDestination& dest);

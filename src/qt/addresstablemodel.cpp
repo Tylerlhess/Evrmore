@@ -11,6 +11,7 @@
 
 #include "base58.h"
 #include "wallet/wallet.h"
+#include "guiutil.h"
 
 
 #include <QFont>
@@ -229,6 +230,19 @@ QVariant AddressTableModel::data(const QModelIndex &index, int role) const
             return {};
         } // no default case, so the compiler can warn about missing cases
         assert(false);
+    } else if (role == Qt::ToolTipRole) {
+        if (column == Address) {
+            // Show P2AH metadata if available
+            const QString addr = rec->address;
+            if (addr.startsWith("A")) {
+                CTxDestination dest = DecodeDestination(addr.toStdString());
+                std::string assetsCsv;
+                if (wallet && wallet->GetDestData(dest, "p2ah_assets", &assetsCsv)) {
+                    QString tip = QString::fromStdString(assetsCsv);
+                    return tr("P2AH assets: %1").arg(tip);
+                }
+            }
+        }
     }
     return QVariant();
 }

@@ -680,6 +680,54 @@ bool Consensus::CheckTxAssets(const CTransaction& tx, CValidationState& state, c
                 }
             }
         }
+
+        // P2AH consensus rule: if spending a P2SH whose redeemScript starts with OP_EVR_ASSET <hash> OP_DROP, require matching owner asset
+        if (AreP2AHDeployed()) {
+            // Extract redeemScript if prevout is P2SH
+            std::vector<std::vector<unsigned char>> stack;
+            if (coin.out.scriptPubKey.IsPayToScriptHash()) {
+                // Need prev scriptSig from this tx input (tx.vin[i]) to recover redeemScript
+                if (i >= tx.vin.size()) return state.DoS(100, false, REJECT_INVALID, "bad-txns-missing-input", false, "", tx.GetHash());
+                if (!EvalScript(stack, tx.vin[i].scriptSig, SCRIPT_VERIFY_NONE, BaseSignatureChecker(), SIGVERSION_BASE))
+                    return state.DoS(100, false, REJECT_INVALID, "bad-txns-bad-scriptsig", false, "", tx.GetHash());
+                if (stack.empty())
+                    return state.DoS(100, false, REJECT_INVALID, "bad-txns-empty-scriptsig", false, "", tx.GetHash());
+                CScript redeem(CScript(stack.back().begin(), stack.back().end()));
+                if (redeem.size() >= 1 && redeem[0] == OP_EVR_ASSET) {
+                    // Parse single or multiple OP_EVR_ASSET <20> OP_DROP prefixes
+                    CScript::const_iterator pc = redeem.begin();
+                    opcodetype op; std::vector<unsigned char> data;
+                    bool hasP2AH = false; std::vector<uint160> expectHashes;
+                    while (redeem.GetOp(pc, op, data)) {
+                        if (op == OP_EVR_ASSET) {
+                            if (!redeem.GetOp(pc, op, data) || data.size() != 20) break; // hash
+                            expectHashes.emplace_back(uint160(data));
+                            if (!redeem.GetOp(pc, op, data) || op != OP_DROP) break;
+                            hasP2AH = true; // allow multiple stacked assets
+                            continue;
+                        }
+                        break;
+                    }
+                    if (hasP2AH) {
+                        bool foundMatchingOwner = false;
+                        for (const auto& txout : tx.vout) {
+                            int nType = 0; int nScriptType = 0; bool fIsOwner = false; int nStart = 0;
+                            if (txout.scriptPubKey.IsAssetScript(nType, nScriptType, fIsOwner, nStart) && nType == TX_TRANSFER_ASSET) {
+                                CAssetTransfer tr; std::string addr;
+                                if (TransferAssetFromScript(txout.scriptPubKey, tr, addr) && IsAssetNameAnOwner(tr.strName)) {
+                                    uint160 h = HashAssetNameTo160(tr.strName);
+                                    for (const auto& eh : expectHashes) { if (h == eh) { foundMatchingOwner = true; break; } }
+                                    if (foundMatchingOwner) break;
+                                }
+                            }
+                        }
+                        if (!foundMatchingOwner) {
+                            return state.DoS(100, false, REJECT_INVALID, "bad-txns-p2ah-missing-owner-asset", false, "", tx.GetHash());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Create map that stores the amount of an asset transaction output. Used to verify no assets are burned

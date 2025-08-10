@@ -425,6 +425,100 @@ UniValue verifymessage(const JSONRPCRequest& request)
     return (pubkey.GetID() == *keyID);
 }
 
+UniValue signmessagep2ah(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 2)
+        throw std::runtime_error(
+            "signmessagep2ah \"asset_name!\" \"message\"\n"
+            "\nSign a message using the private key that controls the administrative asset (owner token).\n"
+            "\nArguments:\n"
+            "1. \"asset_name!\"  (string, required) Owner asset name ending with !\n"
+            "2. \"message\"      (string, required) Message to sign\n"
+        );
+
+    std::string ownerName = request.params[0].get_str();
+    std::string message = request.params[1].get_str();
+
+    AssetType at; std::string err;
+    if (!IsAssetNameValid(ownerName, at, err) || !IsAssetNameAnOwner(ownerName))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid owner asset: ") + ownerName);
+
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+    EnsureWalletIsUnlocked(pwallet);
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    // Find an address in wallet that holds this owner asset
+    std::string strAddress;
+    for (const auto& it : pwallet->mapAddressBook) {
+        const std::string addr = EncodeDestination(it.first);
+        CAmount bal = 0;
+        if (GetMyAssetBalance(ownerName, bal, 0) && bal >= OWNER_ASSET_AMOUNT) {
+            strAddress = addr;
+            break;
+        }
+    }
+    if (strAddress.empty())
+        throw JSONRPCError(RPC_WALLET_ERROR, "Owner asset not found in wallet");
+
+    CTxDestination dest = DecodeDestination(strAddress);
+    const CKeyID* keyID = boost::get<CKeyID>(&dest);
+    if (!keyID) throw JSONRPCError(RPC_WALLET_ERROR, "Owner address does not refer to key");
+
+    CKey key;
+    if (!pwallet->GetKey(*keyID, key))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Private key for owner address not available");
+
+    CHashWriter ss(SER_GETHASH, 0);
+    ss << strMessageMagic;
+    ss << message;
+
+    std::vector<unsigned char> vchSig;
+    if (!key.SignCompact(ss.GetHash(), vchSig))
+        throw JSONRPCError(RPC_WALLET_ERROR, "Message signing failed");
+
+    UniValue result(UniValue::VOBJ);
+    result.push_back(Pair("asset", ownerName));
+    result.push_back(Pair("address", strAddress));
+    result.push_back(Pair("signature", EncodeBase64(vchSig.data(), vchSig.size())));
+    return result;
+}
+
+UniValue verifymessagep2ah(const JSONRPCRequest& request)
+{
+    if (request.fHelp || request.params.size() != 3)
+        throw std::runtime_error(
+            "verifymessagep2ah \"asset_name!\" \"address\" \"signature\"\n"
+            "\nVerify a message signature against the owner asset and address.\n"
+        );
+    std::string ownerName = request.params[0].get_str();
+    std::string strAddress = request.params[1].get_str();
+    std::string strSign = request.params[2].get_str();
+
+    AssetType at; std::string err;
+    if (!IsAssetNameValid(ownerName, at, err) || !IsAssetNameAnOwner(ownerName))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Invalid owner asset: ") + ownerName);
+
+    CTxDestination destination = DecodeDestination(strAddress);
+    const CKeyID *keyID = boost::get<CKeyID>(&destination);
+    if (!keyID) throw JSONRPCError(RPC_TYPE_ERROR, "Address does not refer to key");
+
+    bool fInvalid = false;
+    std::vector<unsigned char> vchSig = DecodeBase64(strSign.c_str(), &fInvalid);
+    if (fInvalid) throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Malformed base64 encoding");
+
+    CHashWriter ss(SER_GETHASH, 0);
+    ss << strMessageMagic;
+    ss << ownerName; // bind signature to owner asset as well
+    ss << strAddress;
+
+    CPubKey pubkey;
+    if (!pubkey.RecoverCompact(ss.GetHash(), vchSig)) return false;
+    return (pubkey.GetID() == *keyID);
+}
 UniValue signmessagewithprivkey(const JSONRPCRequest& request)
 {
     if (request.fHelp || request.params.size() != 2)
@@ -1335,6 +1429,8 @@ static const CRPCCommand commands[] =
     { "util",               "createmultisig",         &createmultisig,         {"nrequired","keys"} },
     { "util",               "verifymessage",          &verifymessage,          {"address","signature","message"} },
     { "util",               "signmessagewithprivkey", &signmessagewithprivkey, {"privkey","message"} },
+    { "assets",             "signmessagep2ah",        &signmessagep2ah,        {"asset_name","message"} },
+    { "assets",             "verifymessagep2ah",      &verifymessagep2ah,      {"asset_name","address","signature"} },
 
     /* Address index */
     { "addressindex",       "getaddressmempool",      &getaddressmempool,      {"addresses","includeAssets"} },

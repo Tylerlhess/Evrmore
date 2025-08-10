@@ -355,6 +355,13 @@ QString HtmlEscape(const QString& str, bool fMultiLine)
     return escaped;
 }
 
+QString formatP2AHDisplay(const QString& address, const QString& assetName, const QString& chain)
+{
+    if (!address.startsWith("A")) return address;
+    if (!assetName.isEmpty()) return QString("%1@%2").arg(assetName, chain);
+    return address; // fallback
+}
+
 QString HtmlEscape(const std::string& str, bool fMultiLine)
 {
     return HtmlEscape(QString::fromStdString(str), fMultiLine);

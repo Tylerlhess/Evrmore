@@ -624,4 +624,7 @@ bool ContextualCheckReissueReminting(const CNewAsset& prev_asset, const CReissue
 CAmount CalculateToll(const CAmount sentAmount, const CAmount tollAmount);
 bool HandleTollAssetChange(const std::pair<std::string, CAmount>& assetChange, const std::map<CTxDestination, std::vector<CAssetTollTracker>>& mapAssetTollInputAmounts, CMutableTransaction& txNew, CAssetsCache* passets, const std::string verifier);
 
+// Compute HASH160 from a normalized asset name (uppercase), used for P2AH addresses
+uint160 HashAssetNameTo160(const std::string& assetName);
+
 #endif //EVRMORECOIN_ASSET_PROTOCOL_H

@@ -3421,6 +3421,8 @@ bool CWallet::CreateTransactionAll(const std::vector<CRecipient>& vecSend, CWall
             // Start with no fee and loop until there is enough fee
             while (true)
             {
+                // Track owner assets required for P2AH inputs; persist across iterations until satisfied
+                static std::set<std::string> p2ahOwnerNamesAccumulated;
 
                 std::map<CTxDestination, std::vector<CAssetTollTracker>> mapAssetTollInputAmounts;
 
@@ -3544,6 +3546,19 @@ bool CWallet::CreateTransactionAll(const std::vector<CRecipient>& vecSend, CWall
                     }
                 }
 
+                // If we are required to include owner asset transfers (P2AH spend), append those outputs now
+                if (!p2ahOwnerNamesAccumulated.empty()) {
+                    for (const auto& ownerName : p2ahOwnerNamesAccumulated) {
+                        CScript scriptOwnerOut = assetScriptChange;
+                        CAssetTransfer ownerTransfer(ownerName, OWNER_ASSET_AMOUNT);
+                        ownerTransfer.ConstructTransaction(scriptOwnerOut);
+                        CTxOut newOwnerTxOut(0, scriptOwnerOut);
+                        txNew.vout.emplace_back(newOwnerTxOut);
+                        // Ensure asset funds tracked for selection
+                        mapAssetValue[ownerName] += OWNER_ASSET_AMOUNT;
+                    }
+                }
+
                 // Sum up toll amount owed for each toll address that requires a toll
                 std::map<std::string, CAmount> mapSumTollAddresses;
                 for (const auto& [address, tollTrackers] : mapOutputToAddressTollTracker) {
@@ -3590,9 +3605,65 @@ bool CWallet::CreateTransactionAll(const std::vector<CRecipient>& vecSend, CWall
                     if (AreAssetsDeployed()) {
                         setAssets.clear();
                         mapAssetsIn.clear();
+                        // If we just learned we are spending a P2AH UTXO, we must include corresponding owner asset in selection
+                        // Detect on first pass: scan selected coin scripts for TX_ASSETHASH and map them to owner names we hold
+                        if (p2ahOwnerNamesAccumulated.empty() && AreP2AHDeployed()) {
+                            // Inspect redeemScripts of selected P2SH-like inputs to find required P2AH asset hashes
+                            std::set<uint160> requiredHashes;
+                            for (const auto& coin : setCoins) {
+                                const CScript& spk = coin.txout.scriptPubKey;
+                                if (spk.IsPayToScriptHash()) {
+                                    // Extract 20-byte hash from scriptPubKey
+                                    uint160 hspk;
+                                    memcpy(&hspk, &*(spk.begin()+2), 20);
+                                    CScript redeem;
+                                    if (GetCScript(CScriptID(hspk), redeem)) {
+                                        // Parse OP_EVR_ASSET <20> OP_DROP sequences
+                                        CScript::const_iterator pcR = redeem.begin();
+                                        opcodetype op; std::vector<unsigned char> data;
+                                        while (redeem.GetOp(pcR, op, data)) {
+                                            if (op == OP_EVR_ASSET) {
+                                                if (!redeem.GetOp(pcR, op, data) || data.size() != 20) break;
+                                                requiredHashes.insert(uint160(data));
+                                                if (!redeem.GetOp(pcR, op, data) || op != OP_DROP) break;
+                                                continue;
+                                            }
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                    // Fallback to destdata lookup if no redeemScript in keystore
+                                    CTxDestination dest = CScriptID(hspk);
+                                    std::string assetsCsv;
+                                    if (GetDestData(dest, "p2ah_assets", &assetsCsv)) {
+                                        std::stringstream ss(assetsCsv);
+                                        std::string item;
+                                        while (std::getline(ss, item, ',')) {
+                                            boost::trim(item);
+                                            if (!item.empty()) requiredHashes.insert(HashAssetNameTo160(item));
+                                        }
+                                    }
+                                }
+                            }
+                            // Match required hashes against owner assets we hold
+                            if (!requiredHashes.empty()) {
+                                for (const auto& it : mapAssetCoins) {
+                                    const std::string& assetName = it.first;
+                                    if (IsAssetNameAnOwner(assetName)) {
+                                        uint160 h = HashAssetNameTo160(assetName);
+                                        if (requiredHashes.count(h)) p2ahOwnerNamesAccumulated.insert(assetName);
+                                    }
+                                }
+                            }
+                        }
                         if (!SelectAssets(mapAssetCoins, mapAssetValue, setAssets, mapAssetsIn)) {
                             strFailReason = _("Insufficient asset funds");
                             return false;
+                        }
+                        // If we just added owner outputs due to P2AH, restart loop to recompute fees/selection with new outputs
+                        if (!p2ahOwnerNamesAccumulated.empty() && fFirst) {
+                            pick_new_inputs = true;
+                            continue;
                         }
                     }
                     /** RVN END */

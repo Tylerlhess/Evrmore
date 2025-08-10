@@ -275,6 +275,8 @@ public:
         
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,33);	// produces 'E' as first char of address after base58 encoding
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,92);	// produces 'e' as first char of address after base58 encoding
+        // Choose a prefix that Base58 encodes to start with 'A' for P2AH addresses. Using 23 (like 'A' region); adjust if needed.
+        base58Prefixes[ASSET_ADDRESS] = std::vector<unsigned char>(1,23);
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,128); // after base58 encoding, produces a first char of '5' for uncompressed
                                                                             //      WIF, 'K' or 'L' for compressed WIF (as for Bitcoin)
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x88, 0xB2, 0x1E};
@@ -445,6 +447,7 @@ public:
  
         base58Prefixes[PUBKEY_ADDRESS] = std::vector<unsigned char>(1,111);  // produces 'm' or 'n' as first char of address after base58 encoding
         base58Prefixes[SCRIPT_ADDRESS] = std::vector<unsigned char>(1,196);  // produces '2' as first char of address after base58 encoding
+        base58Prefixes[ASSET_ADDRESS] = std::vector<unsigned char>(1,23);    // test/regtest can use same provisional prefix
         base58Prefixes[SECRET_KEY] =     std::vector<unsigned char>(1,239);  // after base58 encoding, produces a first char of '9' for uncompressed
                                                                             //      WIF, 'c' for compressed WIF (as for Bitcoin)
         base58Prefixes[EXT_PUBLIC_KEY] = {0x04, 0x35, 0x87, 0xCF};

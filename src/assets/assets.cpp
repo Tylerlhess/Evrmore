@@ -30,6 +30,7 @@
 #include "coins.h"
 #include "wallet/wallet.h"
 #include "LibBoolEE.h"
+#include "hash.h"
 
 #define SIX_MONTHS 15780000 // Six months worth of seconds
 
@@ -163,6 +164,17 @@ bool IsNameValidBeforeTag(const std::string& name)
     }
 
     return true;
+}
+
+uint160 HashAssetNameTo160(const std::string& assetName)
+{
+    std::string upperName = assetName;
+    std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
+    uint256 sha;
+    CSHA256().Write((const unsigned char*)upperName.data(), upperName.size()).Finalize(sha.begin());
+    uint160 h160;
+    CRIPEMD160().Write(sha.begin(), sha.size()).Finalize((unsigned char*)&h160);
+    return h160;
 }
 
 bool IsQualifierNameValidBeforeTag(const std::string& name)

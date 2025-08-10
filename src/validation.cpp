@@ -5952,6 +5952,12 @@ bool AreP2SHAssetsAllowed() {
     return true;
 }
 
+bool AreP2AHDeployed() {
+    // Gate for future activation; currently always true for development
+    static bool fP2AHIsActive = true;
+    return fP2AHIsActive;
+}
+
 CAssetsCache* GetCurrentAssetCache() {
     return passets;
 }

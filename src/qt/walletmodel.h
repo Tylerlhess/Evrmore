@@ -298,6 +298,9 @@ public:
 
     CWallet* getWallet() const;
 
+    // Resolve P2AH address to human-readable ASSETNAME@CHAIN if wallet can infer it
+    QString resolveP2AHDisplay(const QString& address) const;
+
 private:
     CWallet *wallet;
     bool fHaveWatchOnly;

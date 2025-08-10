@@ -225,6 +225,7 @@ public:
 
     bool operator()(const CKeyID& id) const { return addr->Set(id); }
     bool operator()(const CScriptID& id) const { return addr->Set(id); }
+    bool operator()(const CAssetID& id) const { return addr->Set(id); }
     bool operator()(const CNoDestination& no) const { return false; }
 };
 
@@ -242,6 +243,12 @@ bool CEvrmoreAddress::Set(const CScriptID& id)
     return true;
 }
 
+bool CEvrmoreAddress::Set(const CAssetID& id)
+{
+    SetData(GetParams().Base58Prefix(CChainParams::ASSET_ADDRESS), &id, 20);
+    return true;
+}
+
 bool CEvrmoreAddress::Set(const CTxDestination& dest)
 {
     return boost::apply_visitor(CEvrmoreAddressVisitor(this), dest);
@@ -256,7 +263,8 @@ bool CEvrmoreAddress::IsValid(const CChainParams& params) const
 {
     bool fCorrectSize = vchData.size() == 20;
     bool fKnownVersion = vchVersion == params.Base58Prefix(CChainParams::PUBKEY_ADDRESS) ||
-                         vchVersion == params.Base58Prefix(CChainParams::SCRIPT_ADDRESS);
+                         vchVersion == params.Base58Prefix(CChainParams::SCRIPT_ADDRESS) ||
+                         vchVersion == params.Base58Prefix(CChainParams::ASSET_ADDRESS);
     return fCorrectSize && fKnownVersion;
 }
 
@@ -275,6 +283,8 @@ CTxDestination CEvrmoreAddress::Get(const CChainParams& params) const
         return CKeyID(id);
     else if (vchVersion == params.Base58Prefix(CChainParams::SCRIPT_ADDRESS))
         return CScriptID(id);
+    else if (vchVersion == params.Base58Prefix(CChainParams::ASSET_ADDRESS))
+        return CAssetID(id);
     else
         return CNoDestination();
 }
@@ -290,6 +300,10 @@ bool CEvrmoreAddress::GetIndexKey(uint160& hashBytes, int& type) const
     } else if (vchVersion == GetParams().Base58Prefix(CChainParams::SCRIPT_ADDRESS)) {
         memcpy(&hashBytes, &vchData[0], 20);
         type = 2;
+        return true;
+    } else if (vchVersion == GetParams().Base58Prefix(CChainParams::ASSET_ADDRESS)) {
+        memcpy(&hashBytes, &vchData[0], 20);
+        type = 3;
         return true;
     }
 

@@ -32,6 +32,7 @@
 #include "wallet/feebumper.h"
 #include "wallet/wallet.h"
 #include "wallet/walletdb.h" // for BackupWallet
+#include "assets/assets.h"
 
 #include <stdint.h>
 
@@ -73,6 +74,44 @@ WalletModel::WalletModel(const PlatformStyle *platformStyle, CWallet *_wallet, O
 WalletModel::~WalletModel()
 {
     unsubscribeFromCoreSignals();
+}
+
+QString WalletModel::resolveP2AHDisplay(const QString& address) const
+{
+    if (!address.startsWith("A")) return address;
+    // Compute the address's 20-byte hash; CEvrmoreAddress already validated when shown in UI
+    CEvrmoreAddress a(address.toStdString());
+    CTxDestination dest = a.Get();
+    const CAssetID* assetId = boost::get<CAssetID>(&dest);
+    if (!assetId) return address;
+    // Try to match against owner assets we hold; build name->hash map on the fly
+    std::map<QString, std::map<QString, std::vector<COutput>>> mapAssets;
+    listAssets(mapAssets);
+    for (const auto& kv : mapAssets) {
+        QString assetName = kv.first;
+        if (!assetName.endsWith("!")) continue;
+        uint160 h = HashAssetNameTo160(assetName.toStdString());
+        if (h == *assetId) {
+            QString label = GUIUtil::formatP2AHDisplay(address, assetName);
+            // Persist in address book if not present or unlabeled
+            {
+                LOCK(wallet->cs_wallet);
+                // Store label under both CAssetID and CScriptID so later script-based lookups match
+                CTxDestination dAsset = dest;
+                CScriptID dScript(*(uint160*)boost::get<CAssetID>(&dest));
+                for (const CTxDestination& d : {dAsset, CTxDestination(dScript)}) {
+                    auto it = wallet->mapAddressBook.find(d);
+                    if (it == wallet->mapAddressBook.end()) {
+                        wallet->SetAddressBook(d, label.toStdString(), "send");
+                    } else if (it->second.name.empty()) {
+                        wallet->SetAddressBook(d, label.toStdString(), it->second.purpose);
+                    }
+                }
+            }
+            return label;
+        }
+    }
+    return address;
 }
 
 CAmount WalletModel::getBalance(const CCoinControl *coinControl) const

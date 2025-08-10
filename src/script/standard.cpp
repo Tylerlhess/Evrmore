@@ -35,6 +35,7 @@ const char* GetTxnOutputType(txnouttype t)
     case TX_RESTRICTED_ASSET_DATA: return "nullassetdata";
     case TX_WITNESS_V0_KEYHASH: return "witness_v0_keyhash";
     case TX_WITNESS_V0_SCRIPTHASH: return "witness_v0_scripthash";
+    case TX_ASSETHASH: return "assethash";
 
     /** RVN START */
     case TX_NEW_ASSET: return ASSET_NEW_STRING;
@@ -68,6 +69,14 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, txnouttype& script
     if (scriptPubKey.IsPayToScriptHash())
     {
         typeRet = TX_SCRIPTHASH;
+        std::vector<unsigned char> hashBytes(scriptPubKey.begin()+2, scriptPubKey.begin()+22);
+        vSolutionsRet.push_back(hashBytes);
+        return true;
+    }
+    // P2AH has the same script template as P2SH but encodes to a distinct Base58 version.
+    if (scriptPubKey.size() == 23 && scriptPubKey[0] == OP_HASH160 && scriptPubKey[1] == 0x14 && scriptPubKey[22] == OP_EQUAL)
+    {
+        typeRet = TX_ASSETHASH;
         std::vector<unsigned char> hashBytes(scriptPubKey.begin()+2, scriptPubKey.begin()+22);
         vSolutionsRet.push_back(hashBytes);
         return true;
@@ -256,6 +265,11 @@ bool ExtractDestination(const CScript& scriptPubKey, CTxDestination& addressRet)
     {
         addressRet = CScriptID(uint160(vSolutions[0]));
         return true;
+    }
+    else if (whichType == TX_ASSETHASH)
+    {
+        addressRet = CAssetID(uint160(vSolutions[0]));
+        return true;
     /** RVN START */
     } else if (whichType == TX_NEW_ASSET || whichType == TX_REISSUE_ASSET || whichType == TX_TRANSFER_ASSET) {
         if (scriptType == TX_SCRIPTHASH) {
@@ -343,6 +357,12 @@ public:
     bool operator()(const CScriptID &scriptID) const {
         script->clear();
         *script << OP_HASH160 << ToByteVector(scriptID) << OP_EQUAL;
+        return true;
+    }
+
+    bool operator()(const CAssetID &assetID) const {
+        script->clear();
+        *script << OP_HASH160 << ToByteVector(assetID) << OP_EQUAL;
         return true;
     }
 };
